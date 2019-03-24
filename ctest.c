@@ -36,13 +36,28 @@ int main(int argc, char *argv[])
     servaddr.sin_addr.s_addr = inet_addr(argv[1]);
 
 
-    int ret;
-    char sendbuf[1024] = {0};
-    char recvbuf[1024] = {0};
+    int n;
+    char buffer[16];
+	sendto(sock, "hello!", strlen("hello!"), 0,(struct sockaddr *)&servaddr, sizeof(servaddr));
+	
     /*receive file*/
-	
-	
-	
+	FILE *fp;
+	if((fp = fopen(argv[3],"wb")) == NULL){
+		perror("fopen");
+		exit(1);
+	}
+	recvfrom(sock, buffer, sizeof(buffer), 0,NULL, NULL);
+	while(1){
+		if(!strcmp(buffer, "end"))
+			break;
+		n = fwrite(buffer, sizeof(char), n, fp);
+		printf("fwrite %d bytes\n", n);
+		n = recvfrom(sock, buffer, sizeof(buffer), 0,NULL, NULL);
+		printf("read %d bytes, ", n);
+		
+	}
+	puts("completed");
+	fclose(fp);
     close(sock);
 
     return 0;
