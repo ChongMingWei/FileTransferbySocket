@@ -9,6 +9,11 @@
 #include <sys/stat.h> 				// to get file size
 #include <time.h>					//to get current time
 #include <string.h>					//to determine the protocol and role(server or client)
+#define ERR_EXIT(m) \
+    do { \
+        perror(m); \
+        exit(EXIT_FAILURE); \
+    } while (0)
 void error(const char *msg)
 {
     perror(msg);
@@ -30,9 +35,9 @@ int main(int argc, char *argv[]){
 			printf("Check the parameters again!!\n");
 	}
 	else if(!strcmp("udp",argv[1])){					//strcmp:Check if it is "udp".If two strings are the same,return 0.
-		if(!strcmp("send",argv[2]) && argc == 6)		//Identify the role(server or client) and check parameters
+		if(!strcmp("send",argv[2]))		//Identify the role(server or client) and check parameters
 			Udp_Server(argv);
-		else if(!strcmp("recv",argv[2]) && argc == 5)	
+		else if(!strcmp("recv",argv[2]))	
 			Udp_Client(argv);
 		else
 			printf("Check the parameters again!!\n");
@@ -109,10 +114,6 @@ void Tcp_Server(char *para[]){
      close(sockfd);
 }
 
-
-
-
-
 void Tcp_Client(char *para[]){
 	int sockfd, portno, n;
     struct sockaddr_in serv_addr;
@@ -160,12 +161,119 @@ void Tcp_Client(char *para[]){
 	fclose(fp);
     close(sockfd);
 }
+
 void Udp_Server(char *para[]){
+    int sock,portno;
+    if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
+        ERR_EXIT("socket error");
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+	
+	portno = atoi(para[4]);
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(portno);
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(sock, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+        ERR_EXIT("bind error");
+
+    char recvbuf[1024];
+	char buffer[16];
+    struct sockaddr_in peeraddr;
+    socklen_t peerlen;
+    int n;
+	peerlen = sizeof(peeraddr);
+	memset(recvbuf, 0, sizeof(recvbuf));
+    n = recvfrom(sock, recvbuf,sizeof(recvbuf), 0, (struct sockaddr *)&peeraddr, &peerlen);
+	sendto(sock, "start", sizeof("start"), 0, (struct sockaddr *)&peeraddr, peerlen);
+
+	/*send file*/
+	FILE *fp;
+	if((fp = fopen(para[5],"rb")) == NULL){
+		perror("fopen");
+		exit(1);
+	}
+	/*get file size*/
+	struct stat st;
+	stat(para[5], &st);
+	int file_size = st.st_size;
+	float accratio = 0;
+	float currentratio = 0;
+
+	while(1){
+		if(feof(fp)){
+			time_t rawtime;
+			struct tm * timeinfo;
+			rawtime = time(NULL);
+			timeinfo = localtime(&rawtime);
+			printf("100%\t%d/%d/%d\t%d:%d:%d\n",timeinfo->tm_year+1900,timeinfo->tm_mon,timeinfo->tm_mday
+					,timeinfo->tm_hour,timeinfo->tm_min,timeinfo->tm_sec);
+					
+			/*end signal*/
+			strcpy(buffer, "end");
+			sendto(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&peeraddr, peerlen);
+			
+			break;
+		}
+		n = fread(buffer, sizeof(char), sizeof(buffer), fp);
+		sendto(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&peeraddr, peerlen);
+		/*log file senting*/
+		accratio += (float)n / (float)file_size;//compute how many content has been sent
+		printlog(currentratio, accratio);
+		currentratio = accratio;
+		
+		bzero(buffer,sizeof(buffer));
+	}
+	strcpy(buffer, "end");
+	sendto(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&peeraddr, peerlen);
+
+	
+	fclose(fp);
+    close(sock);
 
 }
+
 void Udp_Client(char *para[]){
+	int sock,portno;
+    if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
+        ERR_EXIT("socket");
 
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+	portno = atoi(para[4]);
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(portno);
+    servaddr.sin_addr.s_addr = inet_addr(para[3]);
+
+
+    int n;
+    char buffer[16];
+	/*start signal*/
+	sendto(sock, "hello!", strlen("hello!"), 0,(struct sockaddr *)&servaddr, sizeof(servaddr));
+	
+    /*receive file*/
+	FILE *fp;
+	if((fp = fopen(para[5],"wb")) == NULL){
+		perror("fopen");
+		exit(1);
+	}
+	recvfrom(sock, buffer, sizeof(buffer), 0,NULL, NULL);
+	while(1){
+		if(!strcmp(buffer, "end")){
+			break;
+		}
+			
+		n = fwrite(buffer, sizeof(char), n, fp);
+		printf("fwrite %d bytes\n", n);
+		n = recvfrom(sock, buffer, sizeof(buffer), 0,NULL, NULL);
+		printf("read %d bytes, ", n);
+		
+	}
+	puts("completed");
+	fclose(fp);
+    close(sock);
 }
+
 void printlog(float cur,float acc){
 	int lastlog = cur*100;
 	int curlog = acc*100;
